@@ -4,7 +4,6 @@ import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.system.plant.DCMotor;
 import java.util.function.Supplier;
-import org.ironmaple.simulation.drivesims.GyroSimulation;
 import swervelib.SwerveModule;
 import swervelib.imu.NavXSwerve;
 import swervelib.imu.Pigeon2Swerve;
@@ -149,21 +148,5 @@ public class SwerveDriveConfiguration
     return fl.angleMotor.getSimMotor();
   }
 
-  /**
-   * Get the gyro simulation for the robot.
-   *
-   * @return {@link GyroSimulation} gyro simulation.
-   */
-  public Supplier<GyroSimulation> getGyroSim()
-  {
-    if (imu instanceof Pigeon2Swerve)
-    {
-      return GyroSimulation.getPigeon2();
-    } else if (imu instanceof NavXSwerve)
-    {
-      return GyroSimulation.getNav2X();
-    }
-    return GyroSimulation.getGeneric();
-  }
 
 }

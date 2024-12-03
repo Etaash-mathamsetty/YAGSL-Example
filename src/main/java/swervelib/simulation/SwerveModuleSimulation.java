@@ -3,27 +3,54 @@ package swervelib.simulation;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
-import org.ironmaple.simulation.motorsims.ControlRequest;
-
-import static edu.wpi.first.units.Units.*;
+import edu.wpi.first.wpilibj.Timer;
 
 /**
- * Class that wraps around {@link org.ironmaple.simulation.drivesims.SwerveModuleSimulation}
+ * Class to hold simulation data for {@link swervelib.SwerveModule}
  */
 public class SwerveModuleSimulation
 {
-  private org.ironmaple.simulation.drivesims.SwerveModuleSimulation mapleSimModule = null;
+
 
   /**
-   * Configure the maple sim module
-   * @param mapleSimModule the {@link org.ironmaple.simulation.drivesims.SwerveModuleSimulation} object for simulation
+   * Main timer to simulate the passage of time.
    */
-  public void configureSimModule(org.ironmaple.simulation.drivesims.SwerveModuleSimulation mapleSimModule) {
-    this.mapleSimModule = mapleSimModule;
-    mapleSimModule.getDriveMotorConfigs()
-            .withDefaultFeedForward(Volts.zero())
-            .withVelocityVoltageController(Volts.per(RPM).ofNative(7.0/3000.0), true);
+  private final Timer             timer;
+  /**
+   * Time delta since last update
+   */
+  private       double            dt;
+  /**
+   * Fake motor position.
+   */
+  private       double            fakePos;
+  /**
+   * The fake speed of the previous state, used to calculate {@link SwerveModuleSimulation#fakePos}.
+   */
+  private       double            fakeSpeed;
+  /**
+   * Last time queried.
+   */
+  private       double            lastTime;
+  /**
+   * Current simulated swerve module state.
+   */
+  private       SwerveModuleState state;
+
+  /**
+   * Create simulation class and initialize module at 0.
+   */
+  public SwerveModuleSimulation()
+  {
+    timer = new Timer();
+    timer.start();
+    lastTime = timer.get();
+    state = new SwerveModuleState(0, Rotation2d.fromDegrees(0));
+    fakeSpeed = 0;
+    fakePos = 0;
+    dt = 0;
   }
+
 
   /**
    * Update the position and state of the module. Called from {@link swervelib.SwerveModule#setDesiredState} function
@@ -33,10 +60,13 @@ public class SwerveModuleSimulation
    */
   public void updateStateAndPosition(SwerveModuleState desiredState)
   {
-    mapleSimModule.requestSteerControl(new ControlRequest.PositionVoltage(desiredState.angle.getMeasure()));
-    mapleSimModule.requestDriveControl(new ControlRequest.VelocityVoltage(
-            RadiansPerSecond.of(desiredState.speedMetersPerSecond / mapleSimModule.WHEEL_RADIUS.in(Meters))
-    ));
+    dt = timer.get() - lastTime;
+    lastTime = timer.get();
+
+    state = desiredState;
+    fakeSpeed = desiredState.speedMetersPerSecond;
+    fakePos += (fakeSpeed * dt);
+
   }
 
   /**
@@ -46,10 +76,8 @@ public class SwerveModuleSimulation
    */
   public SwerveModulePosition getPosition()
   {
-    return new SwerveModulePosition(
-            mapleSimModule.getDriveWheelFinalPosition().in(Radian) * mapleSimModule.WHEEL_RADIUS.in(Meters),
-            mapleSimModule.getSteerAbsoluteFacing()
-    );
+
+    return new SwerveModulePosition(fakePos, state.angle);
   }
 
   /**
@@ -59,12 +87,6 @@ public class SwerveModuleSimulation
    */
   public SwerveModuleState getState()
   {
-    if (mapleSimModule == null)
-    {
-      return new SwerveModuleState();
-    }
-    SwerveModuleState state = mapleSimModule.getCurrentState();
-    state.angle = state.angle.minus(new Rotation2d());
     return state;
   }
 }

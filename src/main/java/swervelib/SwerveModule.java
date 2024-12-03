@@ -138,10 +138,6 @@ public class SwerveModule
   public SwerveModule(int moduleNumber, SwerveModuleConfiguration moduleConfiguration,
                       SimpleMotorFeedforward driveFeedforward)
   {
-    //    angle = 0;
-    //    speed = 0;
-    //    omega = 0;
-    //    fakePos = 0;
     this.moduleNumber = moduleNumber;
     configuration = moduleConfiguration;
     angleOffset = moduleConfiguration.angleOffset;
@@ -204,10 +200,6 @@ public class SwerveModule
     drivePositionCache = new Cache<>(driveMotor::getPosition, 20);
     driveVelocityCache = new Cache<>(driveMotor::getVelocity, 20);
 
-    if (SwerveDriveTelemetry.isSimulation)
-    {
-      simModule = new SwerveModuleSimulation();
-    }
 
     // Force a cache update on init.
     driveVelocityCache.update();
@@ -372,7 +364,10 @@ public class SwerveModule
   public void setDesiredState(SwerveModuleState desiredState, boolean isOpenLoop, boolean force)
   {
     desiredState = SwerveModuleState.optimize(desiredState, Rotation2d.fromDegrees(getAbsolutePosition()));
-
+    if (SwerveDriveTelemetry.isSimulation)
+    {
+      simModule.updateStateAndPosition(desiredState);
+    }
     // If we are forcing the angle
     if (!force && antiJitterEnabled)
     {
@@ -413,10 +408,7 @@ public class SwerveModule
 
     lastState = desiredState;
 
-    if (SwerveDriveTelemetry.isSimulation)
-    {
-      simModule.updateStateAndPosition(desiredState);
-    }
+
 
     // TODO: Change and move to SwerveDriveTelemetry
     if (SwerveDriveTelemetry.verbosity.ordinal() >= TelemetryVerbosity.INFO.ordinal())
@@ -728,10 +720,5 @@ public class SwerveModule
   public SwerveModuleSimulation getSimModule()
   {
     return simModule;
-  }
-
-  public void configureModuleSimulation(org.ironmaple.simulation.drivesims.SwerveModuleSimulation swerveModuleSimulation)
-  {
-    this.simModule.configureSimModule(swerveModuleSimulation);
   }
 }

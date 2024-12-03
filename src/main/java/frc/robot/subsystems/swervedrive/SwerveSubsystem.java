@@ -137,6 +137,8 @@ public class SwerveSubsystem extends SubsystemBase
   @Override
   public void periodic()
   {
+//    swerveDrive.updateOdometry();
+
     // When vision is enabled we must manually update odometry in SwerveDrive
     if (visionDriveTest)
     {

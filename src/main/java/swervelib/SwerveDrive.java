@@ -43,10 +43,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-import org.ironmaple.simulation.SimulatedArena;
-import org.ironmaple.simulation.drivesims.SwerveDriveSimulation;
-import org.ironmaple.simulation.drivesims.SwerveModuleSimulation;
-import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import swervelib.encoders.CANCoderSwerve;
 import swervelib.imu.IMUVelocity;
 import swervelib.imu.Pigeon2Swerve;
@@ -137,10 +133,7 @@ public class SwerveDrive
    * Whether to correct heading when driving translationally. Set to true to enable.
    */
   public        boolean                  headingCorrection                               = false;
-  /**
-   * MapleSim SwerveDrive.
-   */
-  private       SwerveDriveSimulation    mapleSimDrive;
+
   /**
    * Amount of seconds the duration of the timestep the speeds should be applied for.
    */
@@ -214,42 +207,7 @@ public class SwerveDrive
     // If the robot is real, instantiate the IMU instead.
     if (SwerveDriveTelemetry.isSimulation)
     {
-      DriveTrainSimulationConfig simulationConfig = DriveTrainSimulationConfig.Default()
-                                                                              .withBumperSize(
-                                                                                  Meters.of(config.getTracklength())
-                                                                                        .plus(Inches.of(5)),
-                                                                                  Meters.of(config.getTrackwidth())
-                                                                                        .plus(Inches.of(5)))
-                                                                              .withRobotMass(Kilograms.of(config.physicalCharacteristics.robotMassKg))
-                                                                              .withCustomModuleTranslations(config.moduleLocationsMeters)
-                                                                              .withGyro(config.getGyroSim())
-                                                                              .withSwerveModule(() -> new SwerveModuleSimulation(
-                                                                                  config.getDriveMotorSim(),
-                                                                                  config.getAngleMotorSim(),
-                                                                                  config.physicalCharacteristics.conversionFactor.drive.gearRatio,
-                                                                                  config.physicalCharacteristics.conversionFactor.angle.gearRatio,
-                                                                                  Amps.of(config.physicalCharacteristics.driveMotorCurrentLimit),
-                                                                                  Amps.of(20),
-                                                                                  Volts.of(config.physicalCharacteristics.driveFrictionVoltage),
-                                                                                  Volts.of(config.physicalCharacteristics.angleFrictionVoltage),
-                                                                                  Inches.of(
-                                                                                      config.physicalCharacteristics.conversionFactor.drive.diameter /
-                                                                                      2),
-                                                                                  KilogramSquareMeters.of(0.02),
-                                                                                  config.physicalCharacteristics.wheelGripCoefficientOfFriction));
-
-      mapleSimDrive = new SwerveDriveSimulation(simulationConfig, startingPose);
-
-      // feed module simulation instances to modules
-      for (int i = 0; i < swerveModules.length; i++)
-      {
-        this.swerveModules[i].configureModuleSimulation(mapleSimDrive.getModules()[i]);
-      }
-
-      // register the drivetrain simulation
-      SimulatedArena.getInstance().addDriveTrainSimulation(mapleSimDrive);
-
-      simIMU = new SwerveIMUSimulation(mapleSimDrive.getGyroSimulation());
+      simIMU = new SwerveIMUSimulation();
       imuReadingCache = new Cache<>(simIMU::getGyroRotation3d, 5L);
     } else
     {
@@ -304,7 +262,7 @@ public class SwerveDrive
       SwerveDriveTelemetry.measuredStatesObj = new SwerveModuleState[SwerveDriveTelemetry.moduleCount];
     }
 
-    setOdometryPeriod(SwerveDriveTelemetry.isSimulation ? 0.004 : 0.02);
+    setOdometryPeriod(SwerveDriveTelemetry.isSimulation ? 0.01 : 0.02);
 
     checkIfTunerXCompatible();
 
@@ -360,7 +318,6 @@ public class SwerveDrive
   public void setOdometryPeriod(double period)
   {
     odometryThread.stop();
-    SimulatedArena.overrideSimulationTimings(Seconds.of(period), 1);
     odometryThread.startPeriodic(period);
   }
 
@@ -370,7 +327,6 @@ public class SwerveDrive
   public void stopOdometryThread()
   {
     odometryThread.stop();
-    SimulatedArena.overrideSimulationTimings(Seconds.of(TimedRobot.kDefaultPeriod), 5);
   }
 
   /**
@@ -563,7 +519,6 @@ public class SwerveDrive
    */
   public void drive(ChassisSpeeds velocity, boolean isOpenLoop, Translation2d centerOfRotationMeters)
   {
-
     velocity = movementOptimizations(velocity, chassisVelocityCorrection, angularVelocityCorrection);
 
     // Heading Angular Velocity Deadband, might make a configuration option later.
@@ -652,6 +607,7 @@ public class SwerveDrive
   private void setRawModuleStates(SwerveModuleState[] desiredStates, ChassisSpeeds desiredChassisSpeed,
                                   boolean isOpenLoop)
   {
+
     // Desaturates wheel speeds
     if (attainableMaxTranslationalSpeedMetersPerSecond != 0 || attainableMaxRotationalVelocityRadiansPerSecond != 0)
     {
@@ -734,7 +690,7 @@ public class SwerveDrive
     if (SwerveDriveTelemetry.isSimulation)
     {
       odometryLock.lock();
-      Pose2d simulationPose = mapleSimDrive.getSimulatedDriveTrainPose();
+      Pose2d simulationPose = swerveDrivePoseEstimator.getEstimatedPosition();
       odometryLock.unlock();
       return Optional.of(simulationPose);
     }
@@ -759,27 +715,6 @@ public class SwerveDrive
   }
 
   /**
-   * Gets the actual field-relative robot velocity (x, y and omega) during simulation
-   *
-   * @return An optional ChassisSpeeds representing the actual field-relative velocity of the robot, or an empty
-   * optional when running on real robot
-   * @deprecated for testing version of maple-sim only
-   */
-  @Deprecated
-  public Optional<ChassisSpeeds> getSimulationFieldVelocity()
-  {
-    if (SwerveDriveTelemetry.isSimulation)
-    {
-      odometryLock.lock();
-      ChassisSpeeds simulationFieldRelativeVelocity = mapleSimDrive.getDriveTrainSimulatedChassisSpeedsFieldRelative();
-      odometryLock.unlock();
-      return Optional.of(simulationFieldRelativeVelocity);
-    }
-
-    return Optional.empty();
-  }
-
-  /**
    * Gets the current robot-relative velocity (x, y and omega) of the robot
    *
    * @return A ChassisSpeeds object of the current robot-relative velocity
@@ -787,27 +722,6 @@ public class SwerveDrive
   public ChassisSpeeds getRobotVelocity()
   {
     return kinematics.toChassisSpeeds(getStates());
-  }
-
-  /**
-   * Gets the actual robot-relative robot velocity (x, y and omega) during simulation
-   *
-   * @return An optional ChassisSpeeds representing the actual robot-relative velocity of the robot, or an empty
-   * optional when running on real robot
-   * @deprecated for testing version of maple-sim only
-   */
-  @Deprecated
-  public Optional<ChassisSpeeds> getSimulationRobotVelocity()
-  {
-    if (SwerveDriveTelemetry.isSimulation)
-    {
-      odometryLock.lock();
-      ChassisSpeeds simulationFieldRelativeVelocity = mapleSimDrive.getDriveTrainSimulatedChassisSpeedsRobotRelative();
-      odometryLock.unlock();
-      return Optional.of(simulationFieldRelativeVelocity);
-    }
-
-    return Optional.empty();
   }
 
   /**
@@ -821,10 +735,7 @@ public class SwerveDrive
   {
     odometryLock.lock();
     swerveDrivePoseEstimator.resetPosition(getYaw(), getModulePositions(), pose);
-    if (SwerveDriveTelemetry.isSimulation)
-    {
-      mapleSimDrive.setSimulationWorldPose(pose);
-    }
+
     odometryLock.unlock();
     ChassisSpeeds robotRelativeSpeeds = new ChassisSpeeds();
     robotRelativeSpeeds.toFieldRelativeSpeeds(getYaw());
@@ -1124,16 +1035,20 @@ public class SwerveDrive
       // Update odometry
       swerveDrivePoseEstimator.update(getYaw(), getModulePositions());
 
-      if (SwerveDriveTelemetry.isSimulation)
-      {
-        SimulatedArena.getInstance().simulationPeriodic();
-      }
 
       // Update angle accumulator if the robot is simulated
       if (SwerveDriveTelemetry.verbosity.ordinal() >= TelemetryVerbosity.INFO.ordinal())
       {
         if (SwerveDriveTelemetry.isSimulation)
         {
+          System.out.println(swerveDrivePoseEstimator.getEstimatedPosition());
+
+          simIMU.updateOdometry(
+              kinematics,
+              getStates(),
+              getSwerveModulePoses(swerveDrivePoseEstimator.getEstimatedPosition()),
+              field);
+
           field.getObject("XModules").setPoses(getSwerveModulePoses(swerveDrivePoseEstimator.getEstimatedPosition()));
         }
 
@@ -1143,14 +1058,7 @@ public class SwerveDrive
 
       if (SwerveDriveTelemetry.verbosity.ordinal() >= TelemetryVerbosity.POSE.ordinal())
       {
-        if (SwerveDriveTelemetry.isSimulation)
-        {
-          field.setRobotPose(mapleSimDrive.getSimulatedDriveTrainPose());
-          field.getObject("OdometryPose").setPose(swerveDrivePoseEstimator.getEstimatedPosition());
-        } else
-        {
-          field.setRobotPose(swerveDrivePoseEstimator.getEstimatedPosition());
-        }
+        field.setRobotPose(swerveDrivePoseEstimator.getEstimatedPosition());
       }
 
       double sumVelocity = 0;
